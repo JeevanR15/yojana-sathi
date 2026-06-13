@@ -16,7 +16,7 @@ except Exception:
 
 from dotenv import load_dotenv
 
-from gemini_client import embed_text
+from gemini_client import embed_texts
 from mongo_client import COLLECTION_NAME, DB_NAME, get_collection
 
 load_dotenv()
@@ -26,25 +26,18 @@ from schemes_data import SCHEMES  # noqa: E402
 
 INDEX_INSTRUCTIONS = """
 ═══════════════════════════════════════════════════════════════════════════
-NEXT STEP — Create the Vector Search Index in the Atlas UI:
+NEXT STEP — Make sure the Vector Search Index exists.
 
-1. Go to your Atlas cluster → Search → Create Search Index
-2. Choose "Atlas Vector Search" (NOT regular search)
-3. Select database: yojana_sathi, collection: schemes
-4. Use this JSON configuration:
-{
-  "fields": [
-    {
-      "type": "vector",
-      "path": "embedding",
-      "numDimensions": 768,
-      "similarity": "cosine"
-    }
-  ]
-}
-5. Name the index: vector_index
-6. Click Create — it takes 2-3 minutes to become ACTIVE
-7. Once ACTIVE, run the backend:  uvicorn main:app --reload --port 8000
+If you just dropped the collection, the 'vector_index' was deleted too. Recreate it:
+
+    python create_index.py        # creates 'vector_index' and waits until ACTIVE
+
+(create_index.py is idempotent — if the index already exists it just reports status.)
+Once it prints ACTIVE, run the backend:  uvicorn main:app --reload --port 8000
+
+Manual alternative (Atlas UI → Search → Create Search Index → Atlas Vector Search):
+db yojana_sathi, collection schemes, name vector_index, JSON:
+{"fields": [{"type": "vector", "path": "embedding", "numDimensions": 768, "similarity": "cosine"}]}
 ═══════════════════════════════════════════════════════════════════════════
 """
 
@@ -52,28 +45,34 @@ NEXT STEP — Create the Vector Search Index in the Atlas UI:
 def main() -> None:
     collection = get_collection()
 
-    # Drop for clean re-runs.
-    print(f"[seed] Dropping existing collection '{DB_NAME}.{COLLECTION_NAME}' (if any)…")
-    collection.drop()
+    # Clear documents for a clean re-run. We use delete_many (NOT drop) on purpose:
+    # dropping the collection also DELETES the Atlas vector_index, forcing a rebuild
+    # every time. delete_many empties the data but keeps the collection + its index.
+    print(f"[seed] Clearing existing documents in '{DB_NAME}.{COLLECTION_NAME}'…")
+    deleted = collection.delete_many({}).deleted_count
+    print(f"[seed] Removed {deleted} old document(s).")
 
-    inserted = 0
-    for scheme in SCHEMES:
-        # task_type="retrieval_document" because these are the documents being searched.
-        embedding = embed_text(scheme["eligibility_text"], task_type="retrieval_document")
-        collection.insert_one(
-            {
-                "name": scheme["name"],
-                "benefit": scheme["benefit"],
-                "eligibility_text": scheme["eligibility_text"],
-                "required_docs": scheme["required_docs"],
-                "apply_url": scheme["apply_url"],
-                "embedding": embedding,
-            }
-        )
-        inserted += 1
-        print(f"  ✅ Embedded and inserted: {scheme['name']}  (dims={len(embedding)})")
+    # Embed every scheme's eligibility_text in BATCHES (few requests, not one-per-scheme),
+    # so we stay under the free-tier 100-embeddings/minute limit.
+    # task_type="retrieval_document" because these are the documents being searched.
+    texts = [s["eligibility_text"] for s in SCHEMES]
+    print(f"[seed] Embedding {len(texts)} schemes in batches…")
+    embeddings = embed_texts(texts, task_type="retrieval_document")
 
-    print(f"\n[seed] Done. Inserted {inserted}/{len(SCHEMES)} schemes with 768-dim embeddings.")
+    docs = [
+        {
+            "name": s["name"],
+            "benefit": s["benefit"],
+            "eligibility_text": s["eligibility_text"],
+            "required_docs": s["required_docs"],
+            "apply_url": s["apply_url"],
+            "embedding": emb,
+        }
+        for s, emb in zip(SCHEMES, embeddings)
+    ]
+    collection.insert_many(docs)
+
+    print(f"\n[seed] Done. Inserted {len(docs)}/{len(SCHEMES)} schemes with {len(embeddings[0])}-dim embeddings.")
     print(INDEX_INSTRUCTIONS)
 
 

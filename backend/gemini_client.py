@@ -1,11 +1,16 @@
-"""Google Gemini: profile extraction, embeddings, Hindi explanations, form questions.
+"""Google Gemini — EMBEDDINGS ONLY.
+
+Sarvam has no text-embedding API, so the vector-search embeddings live here on Gemini's
+gemini-embedding-001. This is the only Gemini dependency left in the pipeline; all the
+language work (STT, profile extraction, Hindi explanations, TTS) is now Sarvam.
 
 Cost note: the embedding API is called only during seeding and on a real user query.
-Each external call prints a line first so credit usage is always visible in the console.
+Each call prints a line first so credit usage is always visible in the console.
 """
 
-import json
 import os
+import re
+import time
 
 from google import genai
 from google.genai import types
@@ -19,69 +24,45 @@ if not GEMINI_API_KEY:
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-GENERATION_MODEL = "gemini-2.5-flash"
 # gemini-embedding-001 is the current embedding model (text-embedding-004 is retired).
 # It defaults to 3072 dims, but we pin 768 via output_dimensionality so the MongoDB
 # Atlas vector_index (numDimensions: 768) keeps working unchanged.
 EMBEDDING_MODEL = "gemini-embedding-001"
 EMBEDDING_DIMS = 768
 
-PROFILE_SYSTEM = (
-    "You are a government scheme eligibility assistant for India. Extract the user's "
-    "profile from their spoken statement. Return ONLY a valid JSON object with no "
-    "explanation, no markdown, no code fences. If a field is not mentioned, use null."
-)
-
-EXPLAIN_SYSTEM = (
-    "You explain Indian government welfare schemes to rural non-literate people in very "
-    "simple Hindi. Use short sentences. No jargon. Be warm and encouraging like a "
-    "helpful relative."
-)
+# Free tier allows 100 embedding REQUESTS per minute. Batching many texts into one
+# request keeps seeding well under that (150 schemes → 3 requests instead of 150).
+EMBED_BATCH_SIZE = 50
+_EMBED_MAX_RETRIES = 5
+_EMBED_FALLBACK_WAIT_S = 40  # used if the 429 body doesn't tell us how long to wait
 
 
-def _safe_json(raw: str):
-    """Parse JSON, defensively stripping markdown code fences Gemini sometimes adds."""
-    text = (raw or "").strip()
-    if text.startswith("```"):
-        text = text.strip("`")
-        if text.lower().startswith("json"):
-            text = text[4:]
-    try:
-        return json.loads(text)
-    except Exception as e:
-        print(f"[gemini] JSON parse failed: {e}; raw={raw!r}")
-        return None
+def _l2_normalize(vec: list) -> list:
+    """gemini-embedding-001 only L2-normalizes its full 3072-dim output; for dims < 3072
+    we must normalize ourselves so cosine/dotProduct similarity stays correct."""
+    norm = sum(v * v for v in vec) ** 0.5
+    return [v / norm for v in vec] if norm > 0 else vec
 
 
-def extract_profile(transcript: str) -> dict:
-    """Send the transcript to Gemini and get a structured profile dict back."""
-    prompt = f"""Extract profile from this statement: {transcript}
-Return JSON with exactly these fields:
-{{
-  "age": <integer or null>,
-  "gender": <"male"|"female"|"other"|null>,
-  "state": <Indian state name in English or null>,
-  "occupation": <"farmer"|"laborer"|"vendor"|"artisan"|"unemployed"|"other"|null>,
-  "bpl_card": <true|false|null>,
-  "land_ownership": <true|false|null>,
-  "is_widow": <true|false|null>,
-  "is_pregnant": <true|false|null>,
-  "has_girl_child": <true|false|null>,
-  "is_elderly": <true if age >= 60, else false>,
-  "is_urban": <true|false|null>
-}}"""
-    print(f"[gemini] → extract_profile ({GENERATION_MODEL})")
-    response = client.models.generate_content(
-        model=GENERATION_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=PROFILE_SYSTEM,
-            response_mime_type="application/json",
-            temperature=0.1,
-        ),
-    )
-    data = _safe_json(response.text)
-    return data if isinstance(data, dict) else {}
+def _retry_on_429(fn):
+    """Run fn(); on a 429 rate-limit, wait the time Gemini asks for and retry.
+
+    This makes both seeding and live queries self-heal through the 100-requests/minute
+    free-tier embedding limit instead of crashing.
+    """
+    for attempt in range(_EMBED_MAX_RETRIES + 1):
+        try:
+            return fn()
+        except Exception as e:  # noqa: BLE001
+            msg = str(e)
+            is_429 = "429" in msg or "RESOURCE_EXHAUSTED" in msg
+            if not is_429 or attempt == _EMBED_MAX_RETRIES:
+                raise
+            # Gemini tells us how long to wait ("retry in 43.0s" / 'retryDelay': '43s').
+            m = re.search(r"retry(?:Delay)?['\":\s]*in?\s*['\":\s]*([\d.]+)\s*s", msg)
+            wait = (float(m.group(1)) + 2) if m else _EMBED_FALLBACK_WAIT_S
+            print(f"[gemini] embedding rate-limited (429) — waiting {wait:.0f}s then retrying…")
+            time.sleep(wait)
 
 
 def profile_to_search_text(profile: dict) -> str:
@@ -127,79 +108,52 @@ def profile_to_search_text(profile: dict) -> str:
 
 
 def embed_text(text: str, task_type: str = "retrieval_query") -> list:
-    """Embed text with gemini-embedding-001, truncated to 768 dimensions.
+    """Embed ONE text with gemini-embedding-001, truncated to 768 dims (live queries).
 
     Use task_type="retrieval_document" when embedding the scheme texts (seeding) and
     "retrieval_query" when embedding the user's situation — they are designed to be
     compared against each other, which improves retrieval quality.
-
-    gemini-embedding-001 only L2-normalizes its full 3072-dim output. When we request a
-    smaller dimension we must normalize ourselves so cosine/dotProduct stay correct.
     """
     print(f"[gemini] → embed_text ({EMBEDDING_MODEL}, dims={EMBEDDING_DIMS}, task={task_type}, chars={len(text)})")
-    result = client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=text,
-        config=types.EmbedContentConfig(
-            task_type=task_type,
-            output_dimensionality=EMBEDDING_DIMS,
-        ),
-    )
-    values = list(result.embeddings[0].values)
 
-    # L2-normalize the truncated vector (required for dims < 3072).
-    norm = sum(v * v for v in values) ** 0.5
-    if norm > 0:
-        values = [v / norm for v in values]
-    return values
+    def _call():
+        result = client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=text,
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=EMBEDDING_DIMS,
+            ),
+        )
+        return list(result.embeddings[0].values)
+
+    return _l2_normalize(_retry_on_429(_call))
 
 
-def explain_scheme(profile_summary: str, scheme: dict) -> str:
-    """Generate a simple-Hindi explanation for one matched scheme."""
-    docs = ", ".join(scheme.get("required_docs", []))
-    prompt = f"""The user's profile: {profile_summary}
-Matched scheme: {scheme.get('name')} — {scheme.get('benefit')}
-Why they qualify: {scheme.get('eligibility_text')}
-Required documents: {docs}
+def embed_texts(texts: list, task_type: str = "retrieval_document") -> list:
+    """Embed MANY texts, batching into few requests to respect the 100/min free-tier
+    limit (used by seeding). Returns L2-normalized 768-dim vectors in input order.
+    """
+    out = []
+    for start in range(0, len(texts), EMBED_BATCH_SIZE):
+        chunk = texts[start:start + EMBED_BATCH_SIZE]
+        n_batch = start // EMBED_BATCH_SIZE + 1
+        total_batches = (len(texts) + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+        print(
+            f"[gemini] → embed_texts batch {n_batch}/{total_batches} "
+            f"({len(chunk)} texts, {EMBEDDING_MODEL}, dims={EMBEDDING_DIMS}, task={task_type})"
+        )
 
-Write a 3-4 sentence explanation in simple Hindi that:
-1. Tells them which scheme they qualify for and what they will get
-2. Tells them why they qualify in one simple sentence
-3. Lists the documents they need to bring
-Keep it under 80 words. Use simple words a village person would understand."""
-    print(f"[gemini] → explain_scheme '{scheme.get('name')}' ({GENERATION_MODEL})")
-    response = client.models.generate_content(
-        model=GENERATION_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=EXPLAIN_SYSTEM,
-            temperature=0.4,
-        ),
-    )
-    return (response.text or "").strip()
+        def _call():
+            result = client.models.embed_content(
+                model=EMBEDDING_MODEL,
+                contents=chunk,
+                config=types.EmbedContentConfig(
+                    task_type=task_type,
+                    output_dimensionality=EMBEDDING_DIMS,
+                ),
+            )
+            return [list(e.values) for e in result.embeddings]
 
-
-def generate_form_questions(scheme_name: str, profile: dict) -> list:
-    """Ask Gemini for a short list of simple Hindi questions to fill this scheme's form."""
-    prompt = f"""We are helping a rural person apply for the Indian government scheme "{scheme_name}".
-Their known profile (JSON): {json.dumps(profile, ensure_ascii=False)}
-
-Generate a SHORT list (5 to 7) of simple questions IN HINDI to collect the remaining
-information needed to fill the application form — for example full name, father's or
-husband's name, full address, bank account number, Aadhaar number, mobile number.
-Skip anything already known in the profile.
-Return ONLY a JSON array of question strings. No markdown, no explanation."""
-    print(f"[gemini] → generate_form_questions '{scheme_name}' ({GENERATION_MODEL})")
-    response = client.models.generate_content(
-        model=GENERATION_MODEL,
-        contents=prompt,
-        config=types.GenerateContentConfig(
-            system_instruction=EXPLAIN_SYSTEM,
-            response_mime_type="application/json",
-            temperature=0.3,
-        ),
-    )
-    data = _safe_json(response.text)
-    if isinstance(data, list) and data:
-        return [str(q) for q in data]
-    return []
+        out.extend(_l2_normalize(v) for v in _retry_on_429(_call))
+    return out
