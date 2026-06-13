@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(python -m pip install -r backend\\\\requirements.txt)",
+      "Bash(python seed_schemes.py)",
+      "Bash(PYTHONIOENCODING=cp1252 python seed_schemes.py)",
+      "WebFetch(domain:docs.sarvam.ai)",
+      "WebSearch"
+    ]
+  }
+}

@@ -1,0 +1,25 @@
+# FastAPI web framework + ASGI server
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# Multipart form parsing (needed for audio file uploads)
+python-multipart>=0.0.9
+
+# Data validation (FastAPI depends on this; pin it explicitly)
+pydantic>=2.0.0
+
+# Load secrets from .env
+python-dotenv>=1.0.0
+
+# HTTP client for calling the Sarvam AI REST API
+requests>=2.31.0
+
+# MongoDB Atlas driver + dnspython (REQUIRED to parse mongodb+srv:// URIs)
+pymongo>=4.6.0
+dnspython>=2.6.0
+
+# Gemini 2.0 Flash (text) + gemini-embedding-001 (768-dim vectors)
+google-genai>=1.0.0
+
+# PDF generation for the voice form-fill feature
+reportlab>=4.0.0

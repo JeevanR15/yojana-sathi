@@ -1,0 +1,47 @@
+# ─── Dependencies ───
+node_modules/
+.pnp
+.pnp.js
+
+# ─── Next.js build output ───
+.next/
+frontend/.next/
+frontend/out/
+frontend/build/
+
+# ─── Environment variables — NEVER COMMIT THESE ───
+.env
+.env.local
+.env*.local
+backend/.env
+frontend/.env.local
+
+# ─── Python ───
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# ─── Generated PDF form drafts ───
+backend/generated_forms/
+*.pdf
+
+# ─── Logs ───
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ─── OS / IDE ───
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# ─── TypeScript ───
+*.tsbuildinfo
+next-env.d.ts
