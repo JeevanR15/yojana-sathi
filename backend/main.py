@@ -10,6 +10,7 @@ Sarvam has no embedding API.
 """
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from typing import Optional
@@ -29,8 +30,10 @@ import gemini_client
 import mongo_client
 import sarvam_client
 from models import (
+    BeneficiaryGroup,
     ConverseResponse,
     ConverseState,
+    Person,
     FormFillAnswerRequest,
     FormFillAnswerResponse,
     FormFillStartRequest,
@@ -147,62 +150,147 @@ async def match(
     # diverse schemes (scholarships, caste-based, disability, jobs, housing…) the narrow
     # rural profile schema drops critical signal — e.g. a student collapses to "A other."
     # and matches nothing. The clean English transcript keeps every detail and retrieves
-    # far better. profile_summary is still used below as readable context for explanations.
-    profile_summary = gemini_client.profile_to_search_text(profile_dict) or transcript
+    # far better.
     try:
         query_embedding = gemini_client.embed_text(transcript, task_type="retrieval_query")
     except Exception as e:  # noqa: BLE001
         print(f"[/match] embedding error: {e}")
         raise HTTPException(status_code=502, detail="Could not process your request. Please try again.")
 
-    # ── Step 4: Atlas Vector Search ─────────────────────────────────────
+    # ── Step 4: Atlas Vector Search (+ deterministic age gate) ──────────
+    # /match is the legacy single-shot path (the UI uses /converse). We still apply the
+    # age gate so it can never surface an age-contradicting scheme either.
     try:
-        matches = mongo_client.vector_search(query_embedding, limit=3)
+        matches = mongo_client.vector_search(query_embedding, limit=8)
+        age = profile_dict.get("age")
+        matches = [m for m in matches if age_eligibility_ok(age, m.get("eligibility_text", ""))][:3]
     except Exception as e:  # noqa: BLE001
         print(f"[/match] vector search error: {e}")
         raise HTTPException(status_code=502, detail="Could not search schemes right now.")
 
-    # ── Step 5: simple-Hindi explanations for ALL schemes in ONE call ───
-    # Batched (not one call per scheme) to conserve the LLM quota.
-    try:
-        explanations = sarvam_client.explain_schemes(profile_summary, matches)
-    except Exception as e:  # noqa: BLE001
-        print(f"[/match] explanation error: {e}")
-        explanations = [""] * len(matches)
-
+    # ── Step 5: STRICT eligibility audit + Hindi explanations ───────────
+    # Reuse the same auditor as /converse so a card here can never contradict the profile
+    # either (e.g. Widow Pension for a male, or an 18-40 scheme for an older person).
+    profile = Profile(**{k: profile_dict.get(k) for k in Profile.model_fields})
     schemes = []
-    for i, m in enumerate(matches):
-        schemes.append(
-            SchemeResult(
-                name=m.get("name", ""),
-                benefit=m.get("benefit", ""),
-                eligibility_summary=m.get("eligibility_text", ""),
-                required_docs=m.get("required_docs", []),
-                apply_url=m.get("apply_url", ""),
-                match_score=float(m.get("score", 0.0)),
-                hindi_explanation=explanations[i] if i < len(explanations) else "",
-            )
+    try:
+        verdict = sarvam_client.verify_group(
+            [{"relation": "self", "facts": profile_dict, "candidates": matches}], "hi-IN"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[/match] verify error: {e}")
+        verdict = {}
+
+    if isinstance(verdict, dict) and verdict.get("groups"):
+        for k in (verdict["groups"][0].get("kept") or [])[:3]:
+            idx = k.get("index")
+            if isinstance(idx, int) and 0 <= idx < len(matches):
+                m = matches[idx]
+                schemes.append(
+                    SchemeResult(
+                        name=m.get("name", ""),
+                        benefit=m.get("benefit", ""),
+                        eligibility_summary=m.get("eligibility_text", ""),
+                        required_docs=m.get("required_docs", []),
+                        apply_url=m.get("apply_url", ""),
+                        match_score=float(m.get("score", 0.0)),
+                        hindi_explanation=str(k.get("explanation", "")),
+                    )
+                )
+
+    # ── Step 6: return ──────────────────────────────────────────────────
+    if not schemes:
+        audio_text = (verdict.get("message") if isinstance(verdict, dict) else "") or (
+            "हम पक्की तौर पर कोई योजना नहीं बता पाए। कृपया अपने नज़दीकी CSC केंद्र पर जाएँ।"
+        )
+        return MatchResponse(
+            transcript=transcript, profile=profile, schemes=[],
+            audio_explanation_text=audio_text, valid=True, tts_language="hi-IN",
         )
 
-    audio_text = schemes[0].hindi_explanation if schemes else ""
-
-    # ── Step 6: return everything ───────────────────────────────────────
-    # Explanations are generated in Hindi, so the spoken answer is hi-IN here
-    # (the native-language path is only used for the invalid re-prompt above).
-    profile = Profile(**{k: profile_dict.get(k) for k in Profile.model_fields})
     return MatchResponse(
         transcript=transcript,
         profile=profile,
         schemes=schemes,
-        audio_explanation_text=audio_text,
+        audio_explanation_text=schemes[0].hindi_explanation,
         valid=True,
         tts_language="hi-IN",
     )
 
 
 # Conversational helpline tuning.
-CANDIDATE_POOL = 8   # over-fetch this many so the eligibility filter has real choices
-MAX_TURNS = 10       # safety cap: after this many questions, force a recommendation
+# Over-fetch generously PER PERSON: the strict eligibility audit (verify_group) drops the
+# bad matches, so if the pool is too small a person can end up with NOTHING after auditing.
+# A wider pool keeps recall up while the audit keeps precision.
+PERSON_CANDIDATES = 10
+MAX_TURNS = 12          # safety cap (a bit higher: a family covers more ground than one person)
+
+
+def age_eligibility_ok(age, eligibility_text: str) -> bool:
+    """Deterministic age gate (no LLM): return False when a KNOWN age clearly violates an
+    age range stated in the scheme's eligibility text.
+
+    LLMs are unreliable at numeric age reasoning (they catch '18-40' but miss '60 or
+    above'), so this runs as a hard backstop. It only reads ELIGIBILITY age phrases
+    ('aged 18 to 40 years', 'age 60 or above', 'below 6 years') — NOT benefit ages like
+    'pension after age 60', which is the exact distinction the model kept getting wrong.
+    Conservative by design: if no clear age phrase is found, it passes (True).
+    """
+    if not isinstance(age, (int, float)) or isinstance(age, bool):
+        return True
+    t = (eligibility_text or "").lower()
+    # explicit ranges: "aged 18 to 40 years", "18 to 40 years", "between 40 and 79 years"
+    for lo, hi in re.findall(r"(\d{1,2})\s+to\s+(\d{1,2})\s+years", t):
+        if not (int(lo) <= age <= int(hi)):
+            return False
+    for lo, hi in re.findall(r"between\s+(\d{1,2})\s+and\s+(\d{1,2})\s+year", t):
+        if not (int(lo) <= age <= int(hi)):
+            return False
+    # lower bound: "aged 60 years or above", "60 years and above", "age 60 or above"
+    for lo in re.findall(r"(\d{1,2})\s+years?\s+(?:or|and)\s+above", t):
+        if age < int(lo):
+            return False
+    for lo in re.findall(r"aged?\s+(\d{1,2})\s+(?:or|and)\s+above", t):
+        if age < int(lo):
+            return False
+    # upper bound for child schemes: "below 6 years", "under 18 years" (NOT "up to" — that
+    # is often a duration, e.g. "shelter up to 3 years", not an age limit)
+    for hi in re.findall(r"(?:below|under)\s+(\d{1,2})\s+years", t):
+        if age >= int(hi):
+            return False
+    return True
+
+
+def _person_query(relation: str, facts: dict) -> str:
+    """Build a natural-language retrieval query for ONE person from their facts."""
+    bits = []
+    if facts.get("age"):
+        bits.append(f"{facts['age']} years old")
+    if facts.get("gender"):
+        bits.append(str(facts["gender"]))
+    if facts.get("occupation"):
+        bits.append(str(facts["occupation"]))
+    if facts.get("is_student") is True:
+        bits.append("student")
+    base = "A person who is " + ", ".join(bits) if bits else f"A person ({relation})"
+
+    # WHAT the person needs / WHO they are — the topical retrieval signal. We deliberately
+    # EXCLUDE purely-economic facts (below_poverty_line, has_ration_card): those are
+    # eligibility GATES the LLM checks later, and as query terms they wrongly pull food/PDS
+    # schemes that drown out the real need (e.g. a pregnant woman → maternity, not ration).
+    flags = {
+        "is_pregnant": "pregnant, needs maternity help",
+        "is_disabled": "has a disability",
+        "is_widow": "widow",
+        "land_ownership": "owns farm land, is a farmer",
+        "has_girl_child": "has a girl child",
+    }
+    extras = [phrase for key, phrase in flags.items() if facts.get(key) is True]
+    for key in ("category", "education_level", "disability_detail", "needs", "state"):
+        v = facts.get(key)
+        if isinstance(v, str) and v.strip():
+            extras.append(f"{key.replace('_', ' ')}: {v}")
+    return base + ("; " + "; ".join(extras) if extras else "")
 
 
 @app.post("/converse", response_model=ConverseResponse)
@@ -253,19 +341,32 @@ async def converse(
             tts_language=sarvam_client.tts_language(st.language),
         )
 
-    # ── Step 2: merge whatever new facts the citizen just gave us ───────
+    # ── Step 2: update the list of PEOPLE this call is about ────────────
+    # One conversation can cover the caller AND their family members.
     st.history.append({"role": "user", "text": user_text})
+    prior_people = [p.model_dump() for p in st.people]
     try:
-        st.facts = sarvam_client.extract_facts(st.facts, user_text)
+        people = sarvam_client.extract_people(prior_people, user_text)
     except Exception as e:  # noqa: BLE001
-        print(f"[/converse] extract_facts error (continuing with prior facts): {e}")
+        print(f"[/converse] extract_people error (continuing): {e}")
+        people = prior_people or [{"relation": "self", "facts": {}}]
+    st.people = [Person(**p) for p in people]
     st.turn += 1
 
-    # ── Step 3: retrieve candidate schemes from the WHOLE conversation ──
-    query_text = " ".join(h["text"] for h in st.history if h["role"] == "user") or user_text
+    # ── Step 3: retrieve candidate schemes PER PERSON ───────────────────
+    # Deterministic AGE gate is applied here, BEFORE the LLM sees the candidates, so an
+    # age-violating scheme can never be recommended OR mentioned in the spoken summary.
     try:
-        emb = gemini_client.embed_text(query_text, task_type="retrieval_query")
-        candidates = mongo_client.vector_search(emb, limit=CANDIDATE_POOL)
+        people_with_candidates = []
+        for p in st.people:
+            emb = gemini_client.embed_text(_person_query(p.relation, p.facts), task_type="retrieval_query")
+            cands = mongo_client.vector_search(emb, limit=PERSON_CANDIDATES)
+            age = p.facts.get("age")
+            kept = [c for c in cands if age_eligibility_ok(age, c.get("eligibility_text", ""))]
+            dropped = len(cands) - len(kept)
+            if dropped:
+                print(f"[/converse] age gate dropped {dropped} scheme(s) for {p.relation} (age={age})")
+            people_with_candidates.append({"relation": p.relation, "facts": p.facts, "candidates": kept})
     except Exception as e:  # noqa: BLE001
         print(f"[/converse] retrieval error: {e}")
         raise HTTPException(status_code=502, detail="Could not search schemes right now.")
@@ -276,16 +377,16 @@ async def converse(
     )
     force = st.turn >= MAX_TURNS
     try:
-        decision = sarvam_client.decide_next(
-            st.facts, candidates, st.asked, history_text, st.language, force_recommend=force
+        decision = sarvam_client.decide_group(
+            people_with_candidates, st.asked, history_text, st.language, force_recommend=force
         )
     except Exception as e:  # noqa: BLE001
-        print(f"[/converse] decide_next error: {e}")
+        print(f"[/converse] decide_group error: {e}")
         decision = {}
 
     action = decision.get("action")
     message = (decision.get("message") or "").strip()
-    qualified = decision.get("qualified") or []
+    group_specs = decision.get("groups") or []
 
     # ── Branch A: ask one more clarifying question ──────────────────────
     if action != "recommend" and not force:
@@ -303,7 +404,13 @@ async def converse(
             done=False,
         )
 
-    # ── Branch B: recommend only the schemes the citizen qualifies for ──
+    # ── Branch B: recommend — ONLY after a STRICT eligibility audit ─────
+    # decide_group proposed recommending. verify_group now independently audits EVERY
+    # candidate per person and keeps only the ones whose hard eligibility rules the known
+    # facts satisfy (catching e.g. an 18–40 pension recommended to a 55-year-old). The
+    # spoken message AND the per-scheme explanations come from the AUDITED survivors, so a
+    # card can never contradict the stated facts. We deliberately DO NOT fall back to
+    # showing unverified candidates — an honest "couldn't confirm" beats a false positive.
     def _scheme(m: dict, explanation: str) -> SchemeResult:
         return SchemeResult(
             name=m.get("name", ""),
@@ -315,25 +422,53 @@ async def converse(
             hindi_explanation=explanation,
         )
 
-    schemes = []
-    for q in qualified[:3]:
-        idx = q.get("index")
-        if isinstance(idx, int) and 0 <= idx < len(candidates):
-            schemes.append(_scheme(candidates[idx], str(q.get("explanation", ""))))
-    # Fallback: if the model named nothing usable, surface the top candidates so the
-    # user is never left with an empty screen.
-    if not schemes:
-        schemes = [_scheme(m, "") for m in candidates[:3]]
+    def _build_groups(specs: list, kept_key: str) -> list:
+        out = []
+        for g in specs:
+            pi = g.get("person")
+            if not isinstance(pi, int) or not (0 <= pi < len(people_with_candidates)):
+                continue
+            cands = people_with_candidates[pi]["candidates"]
+            relation = people_with_candidates[pi]["relation"]
+            picks = []
+            for item in (g.get(kept_key) or [])[:3]:
+                idx = item.get("index")
+                if isinstance(idx, int) and 0 <= idx < len(cands):
+                    picks.append(_scheme(cands[idx], str(item.get("explanation", ""))))
+            if picks:
+                out.append(BeneficiaryGroup(label=str(g.get("label") or relation), relation=relation, schemes=picks))
+        return out
 
+    try:
+        verdict = sarvam_client.verify_group(people_with_candidates, st.language)
+    except Exception as e:  # noqa: BLE001
+        print(f"[/converse] verify_group error: {e}")
+        verdict = {}
+
+    if isinstance(verdict, dict) and isinstance(verdict.get("groups"), list):
+        groups = _build_groups(verdict["groups"], "kept")
+        message = (verdict.get("message") or "").strip() or message
+    else:
+        # Audit transiently unavailable → fall back to the proposer's picks (best effort).
+        print("[/converse] verify_group unavailable — using proposer's picks")
+        groups = _build_groups(group_specs, "qualified")
+
+    flattened = [s for g in groups for s in g.schemes]
     if not message:
-        message = "Here are the schemes that fit you."
+        message = (
+            "Here are the schemes I could confirm for your family."
+            if groups
+            else "I could not confirm a specific scheme from what I know. Please visit a "
+            "local Common Service Centre (CSC) so someone can check the details with you."
+        )
     st.history.append({"role": "bot", "text": message})
-    print(f"[/converse] turn {st.turn}: RECOMMEND {len(schemes)} scheme(s)")
+    print(f"[/converse] turn {st.turn}: RECOMMEND {len(groups)} group(s), {len(flattened)} scheme(s) [audited]")
     return ConverseResponse(
         action="recommend",
         message=message,
         transcript=user_text,
-        schemes=schemes,
+        groups=groups,
+        schemes=flattened,
         state=st,
         tts_language=sarvam_client.tts_language(st.language),
         done=True,
@@ -342,7 +477,7 @@ async def converse(
 
 @app.post("/tts")
 def tts(req: TTSRequest):
-    """Text → speech via Sarvam bulbul:v1. Returns {audio: base64-wav}."""
+    """Text → speech via Sarvam bulbul:v2. Returns {audio: base64-wav}."""
     try:
         audio_b64 = sarvam_client.text_to_speech(req.text, language_code=req.language)
         return JSONResponse({"audio": audio_b64})

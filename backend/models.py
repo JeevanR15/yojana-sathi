@@ -56,21 +56,34 @@ class TTSRequest(BaseModel):
 
 
 # ── Conversational helpline (/converse) ──────────────────────────────────────
-# The whole conversation state is carried by the client between turns, so the
-# backend stays stateless. The frontend sends `state` back unchanged each turn.
+# One conversation can cover SEVERAL beneficiaries (the caller + their family). We
+# track a list of people, each with their own merged facts, and recommend per person.
+# The whole state is carried by the client between turns, so the backend stays stateless.
+class Person(BaseModel):
+    relation: str = "self"                # "self" | "daughter" | "son" | "spouse" | ...
+    facts: Dict[str, Any] = {}            # merged facts about THIS person
+
+
 class ConverseState(BaseModel):
-    facts: Dict[str, Any] = {}            # accumulated, merged facts about the citizen
+    people: List[Person] = []             # the caller + any family members mentioned
     history: List[Dict[str, str]] = []    # [{"role": "user"|"bot", "text": "..."}]
     asked: List[str] = []                 # questions already asked (avoid repeats)
     language: str = "hi-IN"               # BCP-47 language the citizen is speaking
     turn: int = 0
 
 
+class BeneficiaryGroup(BaseModel):
+    label: str                            # localized, e.g. "You" / "आप" / "Your daughter"
+    relation: str                         # "self" | "daughter" | ...
+    schemes: List[SchemeResult] = []      # schemes THIS person qualifies for
+
+
 class ConverseResponse(BaseModel):
     action: str                           # "ask" (need more info) | "recommend" (done)
     message: str                          # what the bot says, in the citizen's language
     transcript: str                       # what we heard this turn (English) — for display
-    schemes: List[SchemeResult] = []      # populated only when action == "recommend"
+    groups: List[BeneficiaryGroup] = []   # per-beneficiary recommendations (action==recommend)
+    schemes: List[SchemeResult] = []      # flattened union of all groups (compatibility)
     state: ConverseState                  # updated state to send back on the next turn
     tts_language: str = "hi-IN"           # bulbul:v2 code to speak `message` in
     done: bool = False

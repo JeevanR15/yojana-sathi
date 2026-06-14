@@ -26,10 +26,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Missing text" }, { status: 400 });
   }
 
-  // bulbul:v1 caps a single input around 500 chars — stay safely under it.
+  // bulbul caps a single input around 500 chars — stay safely under it.
   const safeText = text.slice(0, 500);
 
-  console.log("[/api/sarvam] → Sarvam TTS (bulbul:v1)", {
+  console.log("[/api/sarvam] → Sarvam TTS (bulbul:v2)", {
     chars: safeText.length,
     language,
   });
@@ -44,13 +44,15 @@ export async function POST(req: NextRequest) {
       body: JSON.stringify({
         inputs: [safeText],
         target_language_code: language,
-        speaker: "meera",
+        // bulbul:v1 + its old speakers (meera, …) are deprecated; v2 speakers are
+        // anushka, manisha, vidya, arya (female), karun, hitesh, abhilash (male), …
+        speaker: "anushka",
         pitch: 0,
         pace: 1.0,
         loudness: 1.5,
         speech_sample_rate: 22050,
         enable_preprocessing: true,
-        model: "bulbul:v1",
+        model: "bulbul:v2",
       }),
     });
 
