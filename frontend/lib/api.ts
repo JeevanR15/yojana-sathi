@@ -40,6 +40,10 @@ export interface MatchResponse {
   profile: Profile;
   schemes: Scheme[];
   audio_explanation_text: string;
+  // valid=false when the spoken input was gibberish/irrelevant (no schemes).
+  // tts_language is the BCP-47 code audio_explanation_text should be spoken in.
+  valid: boolean;
+  tts_language: string;
 }
 
 // POST /match with recorded audio — runs the full STT → profile → vector-search pipeline.
@@ -66,6 +70,60 @@ export async function matchSchemesFromText(text: string): Promise<MatchResponse>
   const res = await fetch(`${BACKEND_URL}/match`, { method: "POST", body: form });
   if (!res.ok) throw new Error(await safeError(res));
   return (await res.json()) as MatchResponse;
+}
+
+// ── Conversational helpline (/converse) ──────────────────────────────────────
+// The whole conversation state is carried by the client between turns; we send it
+// back to the backend unchanged on every turn (the backend is stateless).
+export interface Person {
+  relation: string; // "self" | "daughter" | "son" | ...
+  facts: Record<string, unknown>;
+}
+
+export interface ConverseState {
+  people: Person[]; // the caller + any family members mentioned
+  history: { role: string; text: string }[];
+  asked: string[];
+  language: string;
+  turn: number;
+}
+
+// One beneficiary's recommended schemes (the caller, or a family member).
+export interface BeneficiaryGroup {
+  label: string; // localized, e.g. "You" / "आप" / "Your daughter"
+  relation: string;
+  schemes: Scheme[];
+}
+
+export interface ConverseResponse {
+  action: "ask" | "recommend";
+  message: string; // what the bot says, in the citizen's language
+  transcript: string; // what we heard this turn (English)
+  groups: BeneficiaryGroup[]; // per-beneficiary recommendations (action === "recommend")
+  schemes: Scheme[]; // flattened union (compatibility)
+  state: ConverseState; // send this back on the next turn
+  tts_language: string; // language code to speak `message` in
+  done: boolean;
+}
+
+// One turn of the helpline conversation. Pass audio (preferred) or typed text, plus the
+// state returned by the previous turn (null on the first turn).
+export async function converse(
+  input: { audio?: Blob; text?: string },
+  state: ConverseState | null
+): Promise<ConverseResponse> {
+  const form = new FormData();
+  if (input.audio) form.append("file", input.audio, "recording.webm");
+  if (input.text) form.append("text", input.text);
+  if (state) form.append("state", JSON.stringify(state));
+
+  console.log("[api] → POST /converse", {
+    turn: state?.turn ?? 0,
+    via: input.audio ? "audio" : "text",
+  });
+  const res = await fetch(`${BACKEND_URL}/converse`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(await safeError(res));
+  return (await res.json()) as ConverseResponse;
 }
 
 // POST /api/sarvam — the Next.js proxy that hides the Sarvam key and returns base64 WAV.

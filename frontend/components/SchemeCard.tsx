@@ -14,46 +14,64 @@ export default function SchemeCard({ scheme, index }: SchemeCardProps) {
 
   return (
     <div
-      className="animate-slide-in w-full max-w-xl rounded-2xl border border-white/10 bg-gradient-to-b from-white/[0.07] to-white/[0.02] p-6"
+      className="glass animate-slide-in w-full max-w-xl rounded-3xl p-6 transition duration-300 hover:-translate-y-0.5 hover:border-accent/30"
       style={{ animationDelay: `${index * 0.12}s` }}
     >
       <div className="flex items-start justify-between gap-4">
-        <h3 className="text-2xl font-semibold text-white">{scheme.name}</h3>
-        <span className="shrink-0 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-medium text-accent">
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent/15 text-sm font-bold text-accent ring-1 ring-accent/30">
+            {index + 1}
+          </span>
+          <h3 className="text-xl font-bold leading-snug text-white sm:text-2xl">
+            {scheme.name}
+          </h3>
+        </div>
+        <span className="shrink-0 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
           {pct}% match
         </span>
       </div>
 
-      <p className="mt-2 text-lg font-medium text-accent">{scheme.benefit}</p>
+      <p className="mt-3 text-base font-semibold text-accent sm:text-lg">
+        {scheme.benefit}
+      </p>
 
       {scheme.hindi_explanation && (
-        <p className="mt-3 rounded-xl bg-black/30 px-4 py-3 text-base leading-relaxed text-white/85">
+        <p className="mt-4 rounded-2xl border border-white/5 bg-black/30 px-4 py-3 text-base leading-relaxed text-white/85">
           {scheme.hindi_explanation}
         </p>
       )}
 
-      <div className="mt-4">
-        <p className="text-sm font-semibold text-white/70">Why you qualify</p>
-        <p className="mt-1 text-sm leading-relaxed text-white/60">
+      <div className="mt-5">
+        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/55">
+          <span className="h-1 w-1 rounded-full bg-accent/70" /> Why you qualify
+        </p>
+        <p className="mt-1.5 text-sm leading-relaxed text-white/65">
           {scheme.eligibility_summary}
         </p>
       </div>
 
       <div className="mt-4">
-        <p className="text-sm font-semibold text-white/70">Documents you need</p>
-        <ul className="mt-1 list-inside list-disc space-y-0.5 text-sm text-white/60">
+        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/55">
+          <span className="h-1 w-1 rounded-full bg-accent/70" /> Documents you need
+        </p>
+        <div className="mt-2 flex flex-wrap gap-2">
           {scheme.required_docs.map((doc) => (
-            <li key={doc}>{doc}</li>
+            <span
+              key={doc}
+              className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/70"
+            >
+              {doc}
+            </span>
           ))}
-        </ul>
+        </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-3">
+      <div className="mt-6 flex flex-wrap gap-3">
         <a
           href={scheme.apply_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-black transition hover:brightness-110"
+          className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-black shadow-lg shadow-accent/20 transition hover:brightness-110"
         >
           Apply Now →
         </a>

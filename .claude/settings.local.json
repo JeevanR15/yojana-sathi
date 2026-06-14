@@ -5,7 +5,16 @@
       "Bash(python seed_schemes.py)",
       "Bash(PYTHONIOENCODING=cp1252 python seed_schemes.py)",
       "WebFetch(domain:docs.sarvam.ai)",
-      "WebSearch"
+      "WebSearch",
+      "WebFetch(domain:ai.google.dev)",
+      "Bash(python -c ' *)",
+      "Bash(npx tsc *)",
+      "mcp__visualize__read_me",
+      "Bash(python -c \"import main; print\\('backend imports OK'\\)\")",
+      "Bash(python test_eligibility_audit.py)",
+      "Bash(git checkout *)",
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   }
 }

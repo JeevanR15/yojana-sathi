@@ -83,17 +83,31 @@ def _headers(json_content: bool = False) -> dict:
 
 
 def _safe_json(raw: str):
-    """Parse JSON, defensively stripping the ```json … ``` fences the LLM sometimes adds."""
+    """Parse JSON from an LLM reply, tolerating the junk models sometimes add.
+
+    Handles ```json … ``` fences, leading prose, and trailing characters (e.g. a stray
+    `]}]` after a valid array — which otherwise silently drops a whole turn's data).
+    """
     text = (raw or "").strip()
     if text.startswith("```"):
         text = text.strip("`")
         if text.lower().startswith("json"):
             text = text[4:]
+    text = text.strip()
     try:
         return json.loads(text)
-    except Exception as e:
-        print(f"[sarvam] JSON parse failed: {e}; raw={raw!r}")
-        return None
+    except Exception:
+        pass
+    # Decode the FIRST complete JSON value and ignore anything trailing/leading.
+    for i, ch in enumerate(text):
+        if ch in "{[":
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(text[i:])
+                return obj
+            except Exception:
+                continue
+    print(f"[sarvam] JSON parse failed; raw={raw!r}")
+    return None
 
 
 def transcribe(audio_bytes: bytes, filename: str = "audio.webm", language_code: str = "hi-IN") -> dict:
@@ -313,6 +327,217 @@ Return ONLY this JSON:
 If action is "ask", "qualified" MUST be an empty array."""
     print(f"[sarvam] → decide_next ({LLM_MODEL_BIG}, candidates={len(candidates)}, lang={language_code})")
     raw = _chat(AGENT_SYSTEM, prompt, temperature=0.3, model=LLM_MODEL_BIG)
+    data = _safe_json(raw)
+    return data if isinstance(data, dict) else {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Multi-beneficiary conversation: one chat can cover the caller AND their family.
+# extract_people maintains a list of people; decide_group recommends per person.
+# ─────────────────────────────────────────────────────────────────────────────
+
+PEOPLE_SYSTEM = (
+    "You track the people a caller wants Indian government welfare help for — the caller "
+    "(relation 'self') and any family members they mention. You MERGE new information into "
+    "the right person and ADD a new person when a new family member is introduced. NEVER "
+    "invent facts the caller did not state. Return ONLY a JSON array, no markdown."
+)
+
+GROUP_AGENT_SYSTEM = (
+    "You are a warm, patient telephone helpline agent for Indian government welfare schemes, "
+    "helping rural, often non-literate families. One call can be about several people (the "
+    "caller and their relatives). You speak simply and kindly. CRITICAL RULES: (1) NEVER "
+    "assume or invent facts about ANY person that were not stated — do not guess caste, "
+    "widow/marital status, income, etc. (2) Recommend a scheme for a person ONLY when THAT "
+    "person's known facts clearly satisfy its eligibility rules. (3) If a decisive fact is "
+    "missing for someone, ASK about it instead of guessing. Return ONLY JSON, no markdown."
+)
+
+
+def extract_people(prior_people: list, user_text: str) -> list:
+    """Update the list of people the conversation is about (sarvam-30b).
+
+    The model extracts facts from THIS utterance only (grouped by person); we MERGE them
+    into the prior people server-side by relation. This makes fact-preservation
+    deterministic — the model can't accidentally drop or move a previously-known fact, it
+    only has to assign the new sentence's facts to the right person.
+
+    Returns a list of {"relation": str, "facts": dict}.
+    """
+    known = [{"relation": p.get("relation"), "facts": p.get("facts", {})} for p in (prior_people or [])]
+    prompt = f"""People already in this conversation (with the facts known so far):
+{json.dumps(known, ensure_ascii=False) if known else '(none yet — this is the first thing they said)'}
+
+The caller just said (translated to English): "{user_text}"
+
+From THIS statement ONLY, extract the NEW or UPDATED facts, grouped by WHICH person each
+fact is about. Rules:
+- The caller themself is relation "self". Relatives use "daughter", "son", "spouse",
+  "husband", "wife", "mother", "father", "brother", "sister".
+- Use the known people above to resolve references like "she", "he", "my daughter".
+- Assign each fact to the CORRECT person. Do not mix up the son's and daughter's details.
+- Include ONLY facts actually stated in this statement (do not repeat old facts, do not
+  invent). Use keys like: age, gender, state, area, occupation, employment_status,
+  annual_income, below_poverty_line, has_ration_card, category, marital_status,
+  is_disabled, disability_detail, is_student, education_level, is_pregnant, has_children,
+  has_girl_child, land_ownership, has_bank_account, needs.
+- ALWAYS capture "category" when a caste/community is mentioned, normalizing to one of:
+  "SC" (scheduled caste / dalit), "ST" (scheduled tribe / adivasi), "OBC" (other backward
+  class / backward), "minority", or "general" (forward / upper caste).
+- List ONLY the people mentioned in THIS statement.
+
+Return ONLY a JSON array: [{{"relation": "...", "facts": {{...}}}}, ...]"""
+    print(f"[sarvam] → extract_people ({LLM_MODEL})")
+    # Fact extraction needs no creativity — temperature 0 for the most consistent capture.
+    raw = _chat(PEOPLE_SYSTEM, prompt, temperature=0.0, model=LLM_MODEL)
+    data = _safe_json(raw)
+
+    # Server-side merge: start from prior facts (never lost), overlay this turn's new facts.
+    merged: dict = {p.get("relation") or "self": dict(p.get("facts") or {}) for p in (prior_people or [])}
+    order = [p.get("relation") or "self" for p in (prior_people or [])]
+    if isinstance(data, list):
+        for p in data:
+            if not isinstance(p, dict):
+                continue
+            rel = str(p.get("relation") or "self")
+            facts = p.get("facts") if isinstance(p.get("facts"), dict) else {}
+            clean = {k: v for k, v in facts.items() if v is not None and v != ""}
+            if rel not in merged:
+                merged[rel] = {}
+                order.append(rel)
+            merged[rel].update(clean)
+    if not merged:
+        merged, order = {"self": {}}, ["self"]
+    return [{"relation": r, "facts": merged[r]} for r in order]
+
+
+def decide_group(people_with_candidates: list, asked_topics: list,
+                 history_text: str, language_code: str, force_recommend: bool = False) -> dict:
+    """The brain (sarvam-105b) over MULTIPLE people: ask one more question, or recommend
+    schemes per person.
+
+    `people_with_candidates`: list of {"relation", "facts", "candidates": [scheme dicts]}.
+    Returns {"action", "message", "groups": [{"person": idx, "label", "qualified": [{"index", "explanation"}]}]}.
+    """
+    lang = language_name(language_code)
+    blocks = []
+    for pi, p in enumerate(people_with_candidates):
+        lines = []
+        for ci, s in enumerate(p.get("candidates", [])):
+            docs = ", ".join(s.get("required_docs", []))
+            lines.append(
+                f"    {ci}. {s.get('name')} — benefit: {s.get('benefit')} — "
+                f"eligibility: {s.get('eligibility_text')} — documents: {docs}"
+            )
+        blocks.append(
+            f"PERSON {pi} — relation: {p.get('relation')} — "
+            f"facts: {json.dumps(p.get('facts', {}), ensure_ascii=False)}\n"
+            f"  candidate schemes:\n" + "\n".join(lines)
+        )
+    joined = "\n\n".join(blocks)
+
+    prompt = f"""Conversation so far (for context):
+{history_text or '(this is the very first thing they said)'}
+
+The people this call is about, each with their own candidate schemes (candidates may or
+may NOT actually fit — check each person's eligibility):
+
+{joined}
+
+Topics you have ALREADY asked about (do not repeat any): {asked_topics or 'none'}
+
+Choose ONE action:
+- "ask": if ANY person still needs a decisive fact to determine eligibility (e.g. age,
+  caste/category, marital/widow status, income or BPL, occupation, disability, rural/urban).
+  Ask ONE short, simple question about the single most useful MISSING fact. If it is about a
+  specific family member, name them (e.g. "your daughter"). Never re-ask a known/asked thing.
+- "recommend": ONLY when you can confidently match schemes for the people. For EACH person,
+  list the schemes (by that person's candidate index) whose eligibility their facts clearly
+  satisfy. Exclude any scheme whose required fact is unknown or not met. A person may have
+  zero qualifying schemes — that is fine.
+
+Write everything addressed to the caller (the "message" and every "explanation") in {lang},
+in very simple, warm words. The "message" on recommend should be a short spoken summary that
+covers each person, e.g. "For you: ...; for your daughter: ...".
+{'IMPORTANT: You have gathered enough — you MUST choose "recommend" now (do not ask another question).' if force_recommend else ''}
+
+Return ONLY this JSON:
+{{
+  "action": "ask" | "recommend",
+  "message": "<in {lang}>",
+  "groups": [
+    {{"person": <PERSON number>, "label": "<in {lang}: who this is, e.g. You / Your daughter>",
+      "qualified": [ {{"index": <that person's candidate number>, "explanation": "<in {lang}: 2-3 simple sentences — what they get, why they qualify, which documents to bring>"}} ] }}
+  ]
+}}
+If action is "ask", "groups" MUST be an empty array."""
+    print(f"[sarvam] → decide_group ({LLM_MODEL_BIG}, people={len(people_with_candidates)}, lang={language_code})")
+    raw = _chat(GROUP_AGENT_SYSTEM, prompt, temperature=0.3, model=LLM_MODEL_BIG)
+    data = _safe_json(raw)
+    return data if isinstance(data, dict) else {}
+
+
+VERIFY_SYSTEM = (
+    "You are a STRICT eligibility auditor for Indian government welfare schemes. Your ONLY "
+    "job is to protect citizens from being told they qualify when they do not. For each "
+    "scheme you check EVERY eligibility requirement against the person's KNOWN facts and you "
+    "REJECT the scheme if the person clearly fails ANY requirement, OR if a decisive "
+    "requirement cannot be confirmed from the known facts. Be skeptical, not generous. Never "
+    "assume a fact that was not stated. Return ONLY JSON."
+)
+
+
+def verify_group(people_with_candidates: list, language_code: str) -> dict:
+    """STRICT audit (sarvam-105b): keep ONLY the candidate schemes each person genuinely
+    qualifies for, and write the grounded explanation + spoken summary FROM the survivors
+    (so the card can never contradict the stated facts).
+
+    `people_with_candidates`: list of {"relation", "facts", "candidates": [scheme dicts]}.
+    Returns {"message", "groups": [{"person": idx, "label", "kept": [{"index", "explanation"}]}]}.
+    """
+    lang = language_name(language_code)
+    blocks = []
+    for pi, p in enumerate(people_with_candidates):
+        lines = []
+        for ci, s in enumerate(p.get("candidates", [])):
+            lines.append(f"    {ci}. {s.get('name')} — eligibility: {s.get('eligibility_text')}")
+        blocks.append(
+            f"PERSON {pi} — relation: {p.get('relation')} — "
+            f"facts: {json.dumps(p.get('facts', {}), ensure_ascii=False)}\n"
+            f"  candidate schemes:\n" + "\n".join(lines)
+        )
+    joined = "\n\n".join(blocks)
+
+    prompt = f"""Audit the candidate schemes for each person. Use ONLY the listed facts — do
+NOT assume anything not stated.
+
+{joined}
+
+For EACH candidate, KEEP it only if the person's known facts clearly satisfy EVERY
+requirement in its eligibility text. REJECT it if the person fails any requirement (wrong
+AGE range, wrong gender, wrong caste/category, not a widow / not the required marital status,
+owns more land than allowed, income too high, wrong occupation, etc.) OR if a decisive
+requirement is NOT known from the facts (do not guess).
+
+AGE — be very careful and DO THE ARITHMETIC with the person's stated age:
+- "aged 18 to 40 years at time of enrolment" means the person must be 18-40 NOW. A 55-year-old
+  FAILS this even though the pension is paid "after age 60". Enrolment age ≠ benefit age.
+- "age 60 years or above" means the person must currently be at least 60.
+- "below 6 years", "aged 18 to 50", etc. — check the person's actual age against the range.
+
+Keep at most the 3 best-fitting schemes per person.
+
+Return ONLY this JSON:
+{{
+  "message": "<in {lang}: short, warm spoken summary. For each person, say which schemes they can get. If a person has NO scheme that fits, gently say you could not confirm one for them and they can ask at a local Common Service Centre (CSC). Keep it natural and brief.>",
+  "groups": [
+    {{"person": <number>, "label": "<in {lang}: who this is, e.g. You / Your daughter>",
+      "kept": [ {{"index": <that person's candidate number>, "explanation": "<in {lang}: 2-3 simple sentences — what they get, the SPECIFIC reason their facts qualify them, and which documents to bring>"}} ] }}
+  ]
+}}
+Include a group entry for EVERY person; use an empty "kept" array for anyone with no fitting scheme."""
+    print(f"[sarvam] → verify_group ({LLM_MODEL_BIG}, people={len(people_with_candidates)}, lang={language_code})")
+    raw = _chat(VERIFY_SYSTEM, prompt, temperature=0.1, model=LLM_MODEL_BIG)
     data = _safe_json(raw)
     return data if isinstance(data, dict) else {}
 
