@@ -14,96 +14,100 @@ export default function SchemeCard({ scheme, index }: SchemeCardProps) {
 
   return (
     <div
-      className="glass animate-slide-in w-full max-w-xl rounded-3xl p-6 transition duration-300 hover:-translate-y-0.5 hover:border-accent/30"
+      className="animate-slide-in group rounded-2xl border border-accent/20 bg-gradient-to-br from-white/8 via-white/5 to-white/2 p-6 backdrop-blur-md transition-all duration-300 hover:border-accent/40 hover:shadow-xl hover:shadow-accent/10 sm:p-8"
       style={{ animationDelay: `${index * 0.12}s` }}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <span className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-full bg-accent/15 text-sm font-bold text-accent ring-1 ring-accent/30">
-            {index + 1}
-          </span>
-          <h3 className="text-xl font-bold leading-snug text-white sm:text-2xl">
+      <div className="flex flex-col items-start justify-between gap-4 sm:flex-row sm:items-center">
+        <div className="flex-1">
+          <h3 className="font-poppins text-xl font-bold text-white sm:text-2xl">
             {scheme.name}
           </h3>
+          <p className="mt-2 text-lg font-semibold text-accent">
+            {scheme.benefit}
+          </p>
         </div>
-        <span className="shrink-0 rounded-full border border-accent/40 bg-accent/10 px-3 py-1 text-xs font-semibold text-accent">
-          {pct}% match
-        </span>
+        <div className="shrink-0">
+          <span className="inline-flex items-center rounded-full border border-accent/40 bg-gradient-to-r from-accent/20 to-accent/10 px-4 py-2 text-sm font-bold text-accent">
+            {pct}% Match
+          </span>
+        </div>
       </div>
-
-      <p className="mt-3 text-base font-semibold text-accent sm:text-lg">
-        {scheme.benefit}
-      </p>
 
       {scheme.hindi_explanation && (
-        <p className="mt-4 rounded-2xl border border-white/5 bg-black/30 px-4 py-3 text-base leading-relaxed text-white/85">
+        <div className="mt-5 rounded-xl border border-accent/10 bg-black/40 px-4 py-3 text-sm leading-relaxed text-white/85 sm:text-base">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-accent">
+            हिंदी में
+          </p>
           {scheme.hindi_explanation}
-        </p>
+        </div>
       )}
 
-      <div className="mt-5">
-        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/55">
-          <span className="h-1 w-1 rounded-full bg-accent/70" /> Why you qualify
-        </p>
-        <p className="mt-1.5 text-sm leading-relaxed text-white/65">
-          {scheme.eligibility_summary}
-        </p>
-      </div>
+      <div className="mt-6 grid gap-6 sm:grid-cols-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-accent/70">
+            Why You Qualify
+          </p>
+          <p className="mt-2 text-sm leading-relaxed text-white/70">
+            {scheme.eligibility_summary}
+          </p>
+        </div>
 
-      <div className="mt-4">
-        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/55">
-          <span className="h-1 w-1 rounded-full bg-accent/70" /> Documents you need
-        </p>
-        <div className="mt-2 flex flex-wrap gap-2">
-          {scheme.required_docs.map((doc) => (
-            <span
-              key={doc}
-              className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-xs text-white/70"
-            >
-              {doc}
-            </span>
-          ))}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-widest text-accent/70">
+            Documents Needed
+          </p>
+          <ul className="mt-2 space-y-1">
+            {scheme.required_docs.slice(0, 3).map((doc) => (
+              <li key={doc} className="flex items-start gap-2 text-sm text-white/70">
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" />
+                {doc}
+              </li>
+            ))}
+            {scheme.required_docs.length > 3 && (
+              <li className="text-xs text-white/50">
+                +{scheme.required_docs.length - 3} more
+              </li>
+            )}
+          </ul>
         </div>
       </div>
 
-      <div className="mt-6 flex flex-wrap gap-3">
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
         <a
           href={scheme.apply_url}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-xl bg-accent px-5 py-2.5 text-sm font-semibold text-black shadow-lg shadow-accent/20 transition hover:brightness-110"
+          className="flex-1 rounded-xl bg-gradient-to-r from-accent to-teal-500 px-5 py-3 text-center font-semibold text-black transition duration-300 hover:shadow-lg hover:shadow-accent/40 active:scale-95 sm:py-2.5"
         >
           Apply Now →
         </a>
         <button
           onClick={() => setShowForm(true)}
-          className="rounded-xl border border-white/20 px-5 py-2.5 text-sm font-semibold text-white/90 transition hover:bg-white/10"
+          className="rounded-xl border border-accent/30 bg-white/5 px-5 py-3 font-semibold text-accent transition duration-300 hover:bg-white/10 hover:border-accent/50 sm:py-2.5"
         >
-          🎙️ Fill Form by Voice
+          🎙️ Voice Form
         </button>
       </div>
 
-      {/* "Coming soon" modal — the voice form-fill flow is wired on the backend
-          but intentionally not connected to the UI yet (later in the hackathon). */}
       {showForm && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4"
+          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm"
           onClick={() => setShowForm(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl border border-white/10 bg-[#111] p-6 text-center"
+            className="w-full max-w-md rounded-2xl border border-accent/20 bg-gradient-to-b from-white/10 to-white/5 p-6 text-center backdrop-blur-xl sm:p-8"
             onClick={(e) => e.stopPropagation()}
           >
             <p className="text-4xl">🎙️</p>
-            <h4 className="mt-3 text-xl font-semibold text-white">Voice Form-Fill</h4>
-            <p className="mt-2 text-sm text-white/60">
-              Coming soon — answer a few questions by voice and we&rsquo;ll generate a
-              filled application PDF for{" "}
-              <span className="text-accent">{scheme.name}</span>.
+            <p className="mt-4 font-poppins text-xl font-bold text-white">
+              Coming Soon
+            </p>
+            <p className="mt-2 text-sm text-white/70">
+              Voice-guided form filling will be available in the next update
             </p>
             <button
               onClick={() => setShowForm(false)}
-              className="mt-5 rounded-xl bg-accent px-5 py-2 text-sm font-semibold text-black"
+              className="mt-6 rounded-lg bg-accent/20 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/30"
             >
               Got it
             </button>

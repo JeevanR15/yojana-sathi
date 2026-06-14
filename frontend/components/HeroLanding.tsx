@@ -27,7 +27,7 @@ export interface HeroLandingProps {
 
 const DEFAULTS = {
   site: { title: "Yojna Sathi", subtitleHi: "आपके हक़ की आवाज़", subtitleEn: "The voice of your rights" },
-  user: { firstName: "Aarav" },
+  user: { firstName: "" },
   copy: {
     ctaLine1: "Tell me your needs.",
     ctaLine2: "I'll find your scheme.",
@@ -297,7 +297,7 @@ export default function HeroLanding({ site, user, copy, splineUrl = DEFAULTS.spl
 
         {!started && (
           <>
-            <p className="ys-greet">Hi, {u.firstName}!</p>
+            {/* <p className="ys-greet">Hi{u.firstName}!</p> */}
             <h2 className="ys-cta">{c.ctaLine1}<br /><span>{c.ctaLine2}</span></h2>
             <p className="ys-p">{c.paragraph}</p>
           </>

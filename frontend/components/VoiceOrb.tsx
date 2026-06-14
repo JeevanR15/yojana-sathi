@@ -18,11 +18,6 @@ const Spline = dynamic(() => import("@splinetool/react-spline"), {
 // Placeholder public scene from the spec. If it fails, the CSS orb takes over.
 const SPLINE_SCENE = "https://prod.spline.design/6Wq1Q7YGyM-iab9i/scene.splinecode";
 
-// The bundled Spline scene is just a placeholder cube with axis lines (looks broken),
-// so we render our polished CSS orb instead. Flip this to true once a real, branded
-// Spline scene is available — all the loading/fallback logic below still works.
-const USE_SPLINE = false;
-
 export type OrbState = "idle" | "listening" | "processing" | "results";
 
 interface VoiceOrbProps {
@@ -42,8 +37,8 @@ export default function VoiceOrb({ state }: VoiceOrbProps) {
   }, [loaded]);
 
   return (
-    <div className="relative grid h-[280px] w-[280px] place-items-center">
-      {USE_SPLINE && !useFallback && (
+    <div className="relative grid h-[300px] w-[300px] place-items-center">
+      {!useFallback && (
         <div className={`spline-wrap spline-wrap--${state} absolute inset-0`}>
           <Spline
             scene={SPLINE_SCENE}
@@ -53,8 +48,8 @@ export default function VoiceOrb({ state }: VoiceOrbProps) {
         </div>
       )}
 
-      {/* CSS orb: the default visual, and also the fallback while/if Spline fails. */}
-      {(!USE_SPLINE || useFallback || !loaded) && (
+      {/* CSS orb shows while Spline loads, and stays forever if Spline fails. */}
+      {(useFallback || !loaded) && (
         <div className={`css-orb css-orb--${state}`} aria-hidden>
           <div className="css-orb__ring" />
           <div className="css-orb__core" />
