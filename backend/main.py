@@ -51,7 +51,7 @@ app = FastAPI(title="Yojana Sathi API", version="1.0.0")
 # CORS so the Next.js frontend (3000/3001) can call this API.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:3001"],
+    allow_origins=["*"],  # open for the hosted frontend (no cookies/credentials are used)
     allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
