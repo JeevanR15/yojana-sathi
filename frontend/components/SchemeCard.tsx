@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Scheme } from "@/lib/api";
+import { downloadSchemePdf, type Scheme } from "@/lib/api";
 
 interface SchemeCardProps {
   scheme: Scheme;
@@ -9,8 +9,31 @@ interface SchemeCardProps {
 }
 
 export default function SchemeCard({ scheme, index }: SchemeCardProps) {
-  const [showForm, setShowForm] = useState(false);
   const pct = Math.round((scheme.match_score || 0) * 100);
+  const [downloading, setDownloading] = useState(false);
+
+  // Download a PDF summary for later use — the backend renders it (Indic-script aware),
+  // so the Hindi/Telugu explanation shows correctly. Includes benefit, why-you-qualify,
+  // the documents/certificates to carry, and the official portal link.
+  const downloadScheme = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const blob = await downloadSchemePdf(scheme);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${scheme.name.replace(/[^a-z0-9]+/gi, "_")}_yojana-saathi.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("[card] PDF download failed", err);
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div
@@ -22,9 +45,7 @@ export default function SchemeCard({ scheme, index }: SchemeCardProps) {
           <h3 className="font-poppins text-xl font-bold text-white sm:text-2xl">
             {scheme.name}
           </h3>
-          <p className="mt-2 text-lg font-semibold text-accent">
-            {scheme.benefit}
-          </p>
+          <p className="mt-2 text-lg font-semibold text-accent">{scheme.benefit}</p>
         </div>
         <div className="shrink-0">
           <span className="inline-flex items-center rounded-full border border-accent/40 bg-gradient-to-r from-accent/20 to-accent/10 px-4 py-2 text-sm font-bold text-accent">
@@ -82,38 +103,14 @@ export default function SchemeCard({ scheme, index }: SchemeCardProps) {
           Apply Now →
         </a>
         <button
-          onClick={() => setShowForm(true)}
-          className="rounded-xl border border-accent/30 bg-white/5 px-5 py-3 font-semibold text-accent transition duration-300 hover:bg-white/10 hover:border-accent/50 sm:py-2.5"
+          onClick={downloadScheme}
+          disabled={downloading}
+          className="flex items-center justify-center gap-2 rounded-xl border border-accent/30 bg-white/5 px-5 py-3 font-semibold text-accent transition duration-300 hover:bg-white/10 hover:border-accent/50 disabled:opacity-60 sm:py-2.5"
         >
-          🎙️ Voice Form
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14" /></svg>
+          {downloading ? "Preparing PDF…" : "Download PDF"}
         </button>
       </div>
-
-      {showForm && (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-black/70 p-4 backdrop-blur-sm"
-          onClick={() => setShowForm(false)}
-        >
-          <div
-            className="w-full max-w-md rounded-2xl border border-accent/20 bg-gradient-to-b from-white/10 to-white/5 p-6 text-center backdrop-blur-xl sm:p-8"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <p className="text-4xl">🎙️</p>
-            <p className="mt-4 font-poppins text-xl font-bold text-white">
-              Coming Soon
-            </p>
-            <p className="mt-2 text-sm text-white/70">
-              Voice-guided form filling will be available in the next update
-            </p>
-            <button
-              onClick={() => setShowForm(false)}
-              className="mt-6 rounded-lg bg-accent/20 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/30"
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

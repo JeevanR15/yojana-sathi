@@ -126,18 +126,31 @@ export async function converse(
   return (await res.json()) as ConverseResponse;
 }
 
-// POST /api/sarvam — the Next.js proxy that hides the Sarvam key and returns base64 WAV.
-// Returns null on any failure (TTS is non-fatal: we just show the text instead).
+// POST /scheme-pdf — the backend renders a downloadable PDF summary of a scheme
+// (Indic-script aware, so Hindi/Telugu/etc. explanations render properly). Returns a Blob.
+export async function downloadSchemePdf(scheme: Scheme): Promise<Blob> {
+  const res = await fetch(`${BACKEND_URL}/scheme-pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(scheme),
+  });
+  if (!res.ok) throw new Error(await safeError(res));
+  return res.blob();
+}
+
+// Text → speech via the BACKEND /tts (bulbul:v2). The backend already holds the Sarvam
+// key and is proven working, so we don't depend on the Next dev-server env / proxy.
+// Returns base64 WAV, or null on any failure (TTS is non-fatal — we still show the text).
 export async function fetchTts(text: string, language = "hi-IN"): Promise<string | null> {
   try {
-    console.log("[api] → POST /api/sarvam (TTS)", { chars: text.length, language });
-    const res = await fetch("/api/sarvam", {
+    console.log("[api] → POST /tts", { chars: text.length, language });
+    const res = await fetch(`${BACKEND_URL}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, language }),
     });
     if (!res.ok) {
-      console.error("[api] TTS proxy failed", res.status);
+      console.error("[api] TTS failed", res.status);
       return null;
     }
     const data = await res.json();

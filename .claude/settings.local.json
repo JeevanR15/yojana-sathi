@@ -18,7 +18,8 @@
       "Bash(git push *)",
       "Bash(gh pr create --base main --head feat/voice-helpline-eligibility-audit --title 'Conversational multi-beneficiary helpline with strict eligibility audit' --body ' *)",
       "PowerShell($g = Get-Command gh -ErrorAction SilentlyContinue; if \\($g\\) { Write-Output \"FOUND: $\\($g.Source\\)\"; gh --version } else { Write-Output \"NOT INSTALLED\" })",
-      "Bash(echo \"--- tsc exit: $? ---\")"
+      "Bash(echo \"--- tsc exit: $? ---\")",
+      "Bash(python -c 'import os; p='\\\\''frontend/.env.local'\\\\''; print\\('\\\\''exists'\\\\'', os.path.exists\\(p\\)\\); *)"
     ]
   }
 }

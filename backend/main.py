@@ -23,7 +23,7 @@ except Exception:
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 import form_filler
 import gemini_client
@@ -321,7 +321,9 @@ async def converse(
                 audio_bytes, filename=file.filename or "audio.webm", language_code=language_code
             )
             user_text = stt.get("transcript", "")
-            if st.turn == 0 and stt.get("language_detected"):
+            # Respond in the language of THIS turn (re-detect every turn), so switching
+            # from English to Telugu mid-conversation gets a Telugu reply.
+            if stt.get("language_detected"):
                 st.language = stt["language_detected"]
         else:
             raise HTTPException(status_code=400, detail="Provide either an audio file or text.")
@@ -485,6 +487,22 @@ def tts(req: TTSRequest):
         print(f"[/tts] error: {e}")
         # TTS is non-fatal — return empty so the client just shows the text.
         return JSONResponse({"audio": ""})
+
+
+@app.post("/scheme-pdf")
+def scheme_pdf(scheme: SchemeResult):
+    """Generate a downloadable PDF summary of a matched scheme (Indic-script aware)."""
+    try:
+        pdf = form_filler.generate_scheme_pdf(scheme.model_dump())
+    except Exception as e:  # noqa: BLE001
+        print(f"[/scheme-pdf] error: {e}")
+        raise HTTPException(status_code=500, detail="Could not generate the PDF.")
+    safe = re.sub(r"[^A-Za-z0-9]+", "_", scheme.name).strip("_")[:60] or "scheme"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{safe}_yojana-saathi.pdf"'},
+    )
 
 
 @app.post("/form-fill/start", response_model=FormFillStartResponse)
