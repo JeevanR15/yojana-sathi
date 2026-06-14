@@ -14,7 +14,11 @@
       "Bash(python test_eligibility_audit.py)",
       "Bash(git checkout *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(gh pr create --base main --head feat/voice-helpline-eligibility-audit --title 'Conversational multi-beneficiary helpline with strict eligibility audit' --body ' *)",
+      "PowerShell($g = Get-Command gh -ErrorAction SilentlyContinue; if \\($g\\) { Write-Output \"FOUND: $\\($g.Source\\)\"; gh --version } else { Write-Output \"NOT INSTALLED\" })",
+      "Bash(echo \"--- tsc exit: $? ---\")"
     ]
   }
 }
