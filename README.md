@@ -1,4 +1,28 @@
-# 🌾 Yojana Sathi — Voice-Powered Welfare Scheme Finder
+<div align="center">
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:00C896,100:FF9933&height=220&section=header&text=Yojana%20Sathi&fontSize=68&fontColor=ffffff&fontAlignY=36&desc=Voice-Powered%20Welfare%20Scheme%20Finder%20for%20Rural%20India&descAlignY=58&descAlign=50&animation=fadeIn" width="100%"/>
+
+<br/>
+
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&size=18&pause=1000&color=00C896&center=true&vCenter=true&width=620&lines=Speak+your+situation+in+any+Indian+language;AI+understands+your+life%2C+not+just+keywords;MongoDB+Atlas+%24vectorSearch+semantic+RAG;Schemes+explained+back+in+simple+spoken+Hindi;No+reading.+No+typing.+No+barrier." alt="Typing SVG"/>
+
+<br/><br/>
+
+<img src="https://img.shields.io/badge/HackPrix-S3-00C896?style=for-the-badge&logo=devpost&logoColor=white"/>
+<img src="https://img.shields.io/badge/Hero-MongoDB%20%24vectorSearch-00ED64?style=for-the-badge&logo=mongodb&logoColor=white"/>
+<img src="https://img.shields.io/badge/Voice-Sarvam%20AI-FF9933?style=for-the-badge&logo=audacity&logoColor=white"/>
+<img src="https://img.shields.io/badge/LLM-Gemini%202.0%20Flash-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white"/>
+
+<br/>
+
+<img src="https://img.shields.io/badge/Frontend-Next.js%2014-000000?style=flat-square&logo=nextdotjs"/>
+<img src="https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
+<img src="https://img.shields.io/badge/Styling-Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white"/>
+<img src="https://img.shields.io/badge/Made%20for-Rural%20Bharat-FF9933?style=flat-square&logo=india"/>
+
+</div>
+
+<br/>
 
 A voice-first AI agent that helps non-literate rural Indians discover and apply for
 government welfare schemes. The user **speaks her situation in her own language**, and
@@ -8,7 +32,11 @@ simple spoken Hindi** — no reading or typing required.
 > _"Main 60 saal ki vidhwa hoon, Bihar mein rehti hoon, BPL card hai, zameen hai"_
 > → PM Kisan, Widow Pension, Ayushman Bharat, and more.
 
----
+<div align="center">
+
+<img src="https://capsule-render.vercel.app/api?type=rect&color=0:00C896,100:FF9933&height=3&width=100%25&section=header" width="100%"/>
+
+</div>
 
 ## 🧠 How it works (the architecture, for judges)
 
@@ -41,8 +69,6 @@ simple spoken Hindi** — no reading or typing required.
 The **technical hero** is step 4: MongoDB Atlas Vector Search (`$vectorSearch`) doing
 true semantic retrieval (RAG), not keyword lookup.
 
----
-
 ## 🛠️ Tech stack
 
 | Layer       | Tech                                                                 |
@@ -52,8 +78,6 @@ true semantic retrieval (RAG), not keyword lookup.
 | Voice       | Sarvam AI — STT `saarika:v2`, TTS `bulbul:v1`                         |
 | LLM         | Google Gemini 2.0 Flash + `text-embedding-004`                       |
 | Database    | MongoDB Atlas (M0) with Atlas Vector Search                          |
-
----
 
 ## 🚀 How to run
 
@@ -84,8 +108,6 @@ npm run dev
 
 Open <http://localhost:3000>
 
----
-
 ## 🔑 Environment variables
 
 **backend/.env**
@@ -103,8 +125,6 @@ SARVAM_API_KEY=...
 
 > ⚠️ Both `.env` files are gitignored. Never commit your keys.
 
----
-
 ## 🗄️ MongoDB Vector Search index
 
 After `python seed_schemes.py`, the script prints the exact steps. In short: Atlas UI →
@@ -121,8 +141,6 @@ your cluster → **Search → Create Search Index → Atlas Vector Search**, dat
 
 Wait ~2-3 min until the index status is **ACTIVE** before querying.
 
----
-
 ## 🧯 Troubleshooting
 
 | Problem | Fix |
@@ -137,11 +155,19 @@ Wait ~2-3 min until the index status is **ACTIVE** before querying.
 this. If your demo machine's browser produces an unsupported format, the backend logs
 the exact Sarvam error to the console so you can diagnose quickly.
 
----
-
 ## 💸 API-cost discipline (built in)
 
 - Gemini embeddings are called **only** during seeding and on a real user query.
 - Sarvam TTS is called **only** for the final spoken explanation of a real result.
 - Every external API call prints a `console.log` / `print` line first, so you can see
   exactly when credits are being spent.
+
+<div align="center">
+
+<br/>
+
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:FF9933,100:00C896&height=120&section=footer&animation=fadeIn" width="100%"/>
+
+**Built with 🌾 for Bharat — HackPrix S3**
+
+</div>
