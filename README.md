@@ -8,17 +8,17 @@
 
 <br/><br/>
 
-<img src="https://img.shields.io/badge/HackPrix-S3-00C896?style=for-the-badge&logo=devpost&logoColor=white"/>
-<img src="https://img.shields.io/badge/Hero-MongoDB%20%24vectorSearch-00ED64?style=for-the-badge&logo=mongodb&logoColor=white"/>
-<img src="https://img.shields.io/badge/Voice-Sarvam%20AI-FF9933?style=for-the-badge&logo=audacity&logoColor=white"/>
-<img src="https://img.shields.io/badge/LLM-Gemini%202.0%20Flash-4285F4?style=for-the-badge&logo=googlegemini&logoColor=white"/>
+<a href="https://s3.hackprix.tech/"><img src="https://img.shields.io/badge/HackPrix-S3-00C896?style=for-the-badge&labelColor=0D1117&logo=devpost&logoColor=00C896"/></a>
+<img src="https://img.shields.io/badge/Hero-MongoDB%20%24vectorSearch-13AA52?style=for-the-badge&labelColor=0D1117&logo=mongodb&logoColor=white"/>
+<img src="https://img.shields.io/badge/Voice-Sarvam%20AI-C77D3A?style=for-the-badge&labelColor=0D1117&logo=audacity&logoColor=white"/>
+<img src="https://img.shields.io/badge/LLM-Gemini%202.0%20Flash-3B6FB0?style=for-the-badge&labelColor=0D1117&logo=googlegemini&logoColor=white"/>
 
 <br/>
 
-<img src="https://img.shields.io/badge/Frontend-Next.js%2014-000000?style=flat-square&logo=nextdotjs"/>
-<img src="https://img.shields.io/badge/Backend-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white"/>
-<img src="https://img.shields.io/badge/Styling-Tailwind-06B6D4?style=flat-square&logo=tailwindcss&logoColor=white"/>
-<img src="https://img.shields.io/badge/Made%20for-Rural%20Bharat-FF9933?style=flat-square&logo=india"/>
+<img src="https://img.shields.io/badge/Frontend-Next.js%2014-0D1117?style=flat-square&logo=nextdotjs&logoColor=white"/>
+<img src="https://img.shields.io/badge/Backend-FastAPI-0D1117?style=flat-square&logo=fastapi&logoColor=009688"/>
+<img src="https://img.shields.io/badge/Styling-Tailwind-0D1117?style=flat-square&logo=tailwindcss&logoColor=06B6D4"/>
+<img src="https://img.shields.io/badge/Made%20for-Rural%20Bharat-0D1117?style=flat-square&logo=india&logoColor=FF9933"/>
 
 </div>
 
@@ -41,29 +41,51 @@ simple spoken Hindi** — no reading or typing required.
 ## 🧠 How it works (the architecture, for judges)
 
 ```
- 🎙️  Voice (any Indian language)
-   │
-   ▼
- [1] Sarvam AI  speech-to-text (saarika:v2)   ──►  transcript
-   │   built for Indian languages / code-mixing / dialects
-   ▼
- [2] Gemini 2.0 Flash  profile extraction      ──►  structured JSON
-   │   {age, gender, state, occupation, bpl_card, land, widow, ...}
-   ▼
- [3] Gemini text-embedding-004                 ──►  768-dim vector
-   │   semantic meaning of her situation
-   ▼
- [4] MongoDB Atlas  $vectorSearch (RAG)        ──►  top 3 schemes
-   │   "poor widow farmer" matches "BPL female cultivator
-   │    with spousal bereavement" — no keyword overlap needed
-   ▼
- [5] Gemini 2.0 Flash  simple-Hindi explanation per scheme
-   │
-   ▼
- [6] Sarvam AI  text-to-speech (bulbul:v1)     ──►  spoken Hindi audio
-   │
-   ▼
- 🔊  She hears which schemes she qualifies for and what to do.
+┌──────────────────────────────────────────────────────────────────────┐
+│ 🎙  VOICE  —  spoken aloud in any Indian language                    │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ [1]  SARVAM AI · speech-to-text (saarika:v2)   ──►  transcript       │
+│      built for Indian languages / code-mixing / dialects             │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ [2]  GEMINI 2.0 FLASH · profile extraction   ──►  structured JSON    │
+│      {age, gender, state, occupation, bpl_card, land, widow, ...}    │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ [3]  GEMINI text-embedding-004   ──►  768-dim vector                 │
+│      semantic meaning of her whole situation                         │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ [4]  MONGODB ATLAS · $vectorSearch (RAG)   ──►  top 3 schemes        │
+│      "poor widow farmer"  ≈  "BPL female cultivator with             │
+│      spousal bereavement"  —  no keyword overlap needed              │
+│                                                                      │
+│      ★  THE TECHNICAL HERO — true semantic retrieval, not keywords   │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ [5]  GEMINI 2.0 FLASH · simple-Hindi explanation per scheme          │
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ [6]  SARVAM AI · text-to-speech (bulbul:v1)   ──►  spoken Hindi audio│
+└──────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌──────────────────────────────────────────────────────────────────────┐
+│ 🔊  She HEARS which schemes she qualifies for and what to do         │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
 The **technical hero** is step 4: MongoDB Atlas Vector Search (`$vectorSearch`) doing
@@ -168,6 +190,6 @@ the exact Sarvam error to the console so you can diagnose quickly.
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:FF9933,100:00C896&height=120&section=footer&animation=fadeIn" width="100%"/>
 
-**Built with 🌾 for Bharat — HackPrix S3**
+**Built for Bharat — HackPrix S3**
 
 </div>
