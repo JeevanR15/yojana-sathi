@@ -101,7 +101,7 @@ true semantic retrieval (RAG), not keyword lookup.
 | LLM         | Google Gemini 2.0 Flash + `text-embedding-004`                       |
 | Database    | MongoDB Atlas (M0) with Atlas Vector Search                          |
 
-## 🚀 How to run
+## 🚀 How to run (for devs)
 
 ### 1. Backend
 
@@ -117,8 +117,6 @@ python seed_schemes.py            # run ONCE — embeds + inserts the 15 schemes
 uvicorn main:app --reload --port 8000
 ```
 
-Verify it's alive: open <http://localhost:8000/health> → `{"status":"ok", ...}`
-
 ### 2. Frontend
 
 ```bash
@@ -127,8 +125,6 @@ npm install
 # Fill in frontend/.env.local with NEXT_PUBLIC_BACKEND_URL + SARVAM_API_KEY
 npm run dev
 ```
-
-Open <http://localhost:3000>
 
 ## 🔑 Environment variables
 
@@ -144,8 +140,6 @@ MONGODB_URI=mongodb+srv://...
 NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
 SARVAM_API_KEY=...
 ```
-
-> ⚠️ Both `.env` files are gitignored. Never commit your keys.
 
 ## 🗄️ MongoDB Vector Search index
 
